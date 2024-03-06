@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	_ "github.com/go-sql-driver/mysql"
+	_ "github.com/heroku/x/hmetrics/onload"
 )
 
 const version = "1.0.0"
@@ -42,7 +43,7 @@ type application struct {
 func main() {
 	// os.Setenv("PORT", "8080")
 	// Find .env file
-	// err := godotenv.Load("../../.env")
+	// err := godotenv.Load(".env")
 	// if err != nil{
 	//  log.Fatalf("Error loading .env file: %s", err)
 	// }
