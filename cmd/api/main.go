@@ -42,10 +42,10 @@ type application struct {
 func main() {
 	// os.Setenv("PORT", "8080")
 	// Find .env file
-	err := godotenv.Load("../../.env")
-	if err != nil{
-	 log.Fatalf("Error loading .env file: %s", err)
-	}
+	// err := godotenv.Load("../../.env")
+	// if err != nil{
+	//  log.Fatalf("Error loading .env file: %s", err)
+	// }
 	port := os.Getenv("PORT")
 	if port == "" {
 		log.Fatal("$PORT must be set")
