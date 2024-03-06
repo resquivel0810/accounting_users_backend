@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"os"
 	"time"
-	"github.com/joho/godotenv"
+	// "github.com/joho/godotenv"
 
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/heroku/x/hmetrics/onload"
