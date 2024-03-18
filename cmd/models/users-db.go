@@ -906,7 +906,7 @@ func (m DBModel) ChangePasswordLog(id int, newpwd string) error {
 	return nil
 }
 func mail_send(user *User, subject string, temp string) {
-	from := mail.Address{"Accounting A-Z", "ivangilcat@gmail.com"}
+	from := mail.Address{"Accounting A-Z", "no-reply@accounting-a-z.ch"}
 	to := mail.Address{user.Name, user.Email}
 
 	headers := make(map[string]string)
@@ -928,9 +928,9 @@ func mail_send(user *User, subject string, temp string) {
 		log.Panic(err)
 	}
 	message += buf.String()
-	servername := "smtp.gmail.com:465"
-	host := "smtp.gmail.com"
-	auth := smtp.PlainAuth("", "ivangilcat@gmail.com", "jascpfopvmqnzwvc", host)
+	servername := "server29.hostfactory.ch:465"
+	host := "server29.hostfactory.ch"
+	auth := smtp.PlainAuth("", "no-reply@accounting-a-z.ch", "theStrongestOne1", host)
 	tlsConfig := &tls.Config{
 		InsecureSkipVerify: true,
 		ServerName:         host,
