@@ -49,5 +49,6 @@ func (app *application) routes() *httprouter.Router {
 	router.HandlerFunc(http.MethodGet, "/v1/countCommentsDisplay/", app.countCommentsDisplay)
 	router.HandlerFunc(http.MethodGet, "/v1/countCommentsWatched/", app.countCommentsWatched)
 	router.HandlerFunc(http.MethodGet, "/v1/commentWatched/:id", app.commentWatched)
+	router.HandlerFunc(http.MethodGet, "/v1/mostWatchedTerms", app.mostWatchedTerms)
 	return router
 }

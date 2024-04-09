@@ -480,6 +480,25 @@ func (m DBModel) Countusers() (int, error) {
 	//mail_send(&user, "Confirm your email address", "confirm.html")
 	return total, nil
 }
+func (m DBModel) mostWatchedTerms() (int, error) {
+	var q = "SELECT idterm, COUNT(idterm) AS MOST_FREQUENT FROM preview.metricsterm GROUP BY idterm ORDER BY COUNT(idterm) DESC LIMIT 10"
+	row, err := m.DB.Query(q)
+
+	if err != nil {
+		return 0, err
+	}
+	var total int
+	for row.Next() {
+
+		err := row.Scan(&total)
+		if err != nil {
+			panic(err)
+		}
+
+	}
+	//mail_send(&user, "Confirm your email address", "confirm.html")
+	return total, nil
+}
 func (m DBModel) CountCommentsWatched() (int, error) {
 	var q = "SELECT count(*) FROM feedback WHERE watched = 0"
 	row, err := m.DB.Query(q)

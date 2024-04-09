@@ -347,6 +347,15 @@ func (app *application) countUser(w http.ResponseWriter, r *http.Request) {
 	}
 	err = app.writeJSON(w, http.StatusOK, user, "total")
 }
+func (app *application) mostWatchedTerms(w http.ResponseWriter, r *http.Request) {
+
+	user, err := app.models.DB.mostWatchedTerms()
+	if err != nil {
+		app.errJSON(w, err)
+		return
+	}
+	err = app.writeJSON(w, http.StatusOK, user, "Most watched terms")
+}
 func (app *application) countCommentsDisplay(w http.ResponseWriter, r *http.Request) {
 
 	user, err := app.models.DB.CountCommentsDisplay()
