@@ -1,0 +1,37 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+.DS_Store  # macOS system file that stores custom attributes of its containing folder
+
+# Test binaries, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file (used to configure sets of modules that replace the global go.mod)
+go.work
+
+# Compiled binary directories
+/bin/
+/pkg/
+
+# Dependencies directory (uncomment if not using Go modules)
+# /vendor/
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+
+# IDE configuration directories
+/.vscode/
+/.idea/
+
+# Environment files that may contain sensitive information
+.env
+
