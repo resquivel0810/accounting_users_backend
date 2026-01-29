@@ -12,6 +12,19 @@ import (
 	"github.com/julienschmidt/httprouter"
 )
 
+// RegisterPayload define el body de petición para registro de usuario.
+// No incluye el campo ID porque el UUID se genera en el servidor.
+type RegisterPayload struct {
+	Username  string `json:"username"`
+	Name      string `json:"name"`
+	LastName  string `json:"lastname"`
+	Email     string `json:"email"`
+	PWD       string `json:"pwd"`
+	Role      string `json:"role"`
+	Picture   string `json:"picture"`
+}
+
+// UserPayload se usa para operaciones donde sí se envía el ID (por ejemplo, actualización).
 type UserPayload struct {
 	Id        string `json:"id"`
 	Username  string `json:"username"`
@@ -29,9 +42,19 @@ type UserPayload struct {
 	Updated   string `json:"updated"`
 }
 
+// Register godoc
+// @Summary      Registrar nuevo usuario
+// @Description  Crea un nuevo usuario en el sistema y envía email de confirmación
+// @Tags         users
+// @Accept       json
+// @Produce      json
+// @Param        user  body      RegisterPayload  true  "Datos del usuario para registro (sin ID)"
+// @Success      200   {object}  map[string]interface{}
+// @Failure      400   {object}  map[string]interface{}
+// @Router       /v1/register/ [post]
 func (app *application) Register(w http.ResponseWriter, r *http.Request) {
 	user := models.User{}
-	var payload UserPayload
+	var payload RegisterPayload
 	err := json.NewDecoder(r.Body).Decode(&payload)
 	if err != nil {
 		app.errJSON(w, err)
@@ -42,9 +65,11 @@ func (app *application) Register(w http.ResponseWriter, r *http.Request) {
 	user.Email = payload.Email
 	user.PWD = payload.PWD
 	user.Role, _ = strconv.Atoi(payload.Role)
-	user.Account, _ = strconv.Atoi(payload.Account)
+	// account: 1 = free por defecto en registro
+	user.Account = 1
 	user.Picture = payload.Picture
-	user.Confirmed, _ = strconv.Atoi(payload.Confirmed)
+	// confirmed: 0 por defecto, hasta que el usuario confirme su correo
+	user.Confirmed = 0
 
 	aux, err1 := app.models.DB.Register(&user)
 	if err1 != nil {
@@ -73,7 +98,7 @@ func (app *application) googleAuth(w http.ResponseWriter, r *http.Request) {
 	user.Picture = payload.Picture
 	user.Confirmed, _ = strconv.Atoi(payload.Confirmed)
 	var id, _ = app.models.DB.VerifyEmail(user.Email)
-	if id > 0 {
+	if id != "" {
 		aux, _ := app.models.DB.Get(id)
 		token, err := app.models.DB.GnerateToken(id, app.config.jwt.secret)
 		if err != nil {
@@ -93,13 +118,15 @@ func (app *application) googleAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		user.Username = app.models.DB.RandomUser(user.Email)
-		token, err := app.models.DB.GnerateToken(id, app.config.jwt.secret)
 		aux, err1 := app.models.DB.RegisterGoogle(&user)
 		if err1 != nil {
 			app.errJSON(w, err1)
+			return
 		}
+		token, err := app.models.DB.GnerateToken(aux.Id, app.config.jwt.secret)
 		if err != nil {
 			app.errJSON(w, err)
+			return
 		}
 		aux.Token = token
 		err = app.writeJSON(w, http.StatusOK, aux, "user")
@@ -116,7 +143,7 @@ func (app *application) Update(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		app.errJSON(w, err)
 	}
-	user.Id, _ = strconv.Atoi(payload.Id)
+	user.Id = payload.Id
 	user.Username = payload.Username
 	user.Name = payload.Name
 	user.LastName = payload.LastName
@@ -144,7 +171,7 @@ func (app *application) UpdateLog(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		app.errJSON(w, err)
 	}
-	user.Id, _ = strconv.Atoi(payload.Id)
+	user.Id = payload.Id
 	user.Username = payload.Username
 	user.Name = payload.Name
 	user.LastName = payload.LastName
@@ -186,8 +213,7 @@ func (app *application) SaveReason(w http.ResponseWriter, r *http.Request) {
 	}
 	app.logger.Println("Id is: ", params.Id)
 	app.logger.Println("Reason is: ", params.Reason)
-	id, _ := strconv.Atoi(params.Id)
-	res, err := app.models.DB.SaveReason(id, params.Reason)
+	res, err := app.models.DB.SaveReason(params.Id, params.Reason)
 	if err != nil {
 		app.errJSON(w, err)
 	}
@@ -199,6 +225,16 @@ type LParams struct {
 	Pwd string `json:"pwd"`
 }
 
+// Login godoc
+// @Summary      Iniciar sesión
+// @Description  Autentica un usuario con username/email y contraseña, retorna token JWT
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        credentials  body      LParams  true  "Credenciales de login"
+// @Success      200         {object}  map[string]interface{}
+// @Failure      400         {object}  map[string]interface{}
+// @Router       /v1/login/ [post]
 func (app *application) Login(w http.ResponseWriter, r *http.Request) {
 	var params LParams
 	err := json.NewDecoder(r.Body).Decode(&params)
@@ -236,17 +272,16 @@ type EmParams struct {
 
 func (app *application) changeEmail(w http.ResponseWriter, r *http.Request) {
 	var params EmParams
-	var id int
 	err := json.NewDecoder(r.Body).Decode(&params)
 	if err != nil {
 		app.errJSON(w, err)
+		return
 	}
 	app.logger.Println("Id is: ", params.Id)
 	app.logger.Println("Email is: ", params.Email)
-	id, err = strconv.Atoi(params.Id)
-	valid, err := app.models.DB.ValidateToken(params.Token, id, app.config.jwt.secret)
+	valid, err := app.models.DB.ValidateToken(params.Token, params.Id, app.config.jwt.secret)
 	if valid {
-		res, err := app.models.DB.UpdateEmail(id, params.Email)
+		res, err := app.models.DB.UpdateEmail(params.Id, params.Email)
 		if err != nil {
 			app.errJSON(w, err)
 		}
@@ -282,17 +317,29 @@ func (app *application) SaveComment(w http.ResponseWriter, r *http.Request) {
 	}
 	err = app.writeJSON(w, http.StatusOK, res, "Response")
 }
+// getUser godoc
+// @Summary      Obtener usuario por ID
+// @Description  Retorna la información de un usuario específico por su ID
+// @Tags         users
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "ID del usuario (UUID)"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]interface{}
+// @Router       /v1/user/{id} [get]
 func (app *application) getUser(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id, err := strconv.Atoi(params.ByName("id"))
+	id := params.ByName("id")
+	app.logger.Println("id is ", id)
+	user, err := app.models.DB.Get(id)
 	if err != nil {
-		app.logger.Print(errors.New("invalid id parameter"))
 		app.errJSON(w, err)
 		return
 	}
-	app.logger.Println("id is ", id)
-	user, err := app.models.DB.Get(id)
 	err = app.writeJSON(w, http.StatusOK, user, "user")
+	if err != nil {
+		app.errJSON(w, err)
+	}
 }
 func (app *application) getFolioId(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
@@ -338,6 +385,15 @@ func (app *application) countActiveUser(w http.ResponseWriter, r *http.Request) 
 	}
 	err = app.writeJSON(w, http.StatusOK, user, "total")
 }
+// countUser godoc
+// @Summary      Contar usuarios totales
+// @Description  Retorna el número total de usuarios registrados
+// @Tags         metrics
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]interface{}
+// @Router       /v1/countusers/ [get]
 func (app *application) countUser(w http.ResponseWriter, r *http.Request) {
 
 	user, err := app.models.DB.Countusers()
@@ -394,31 +450,41 @@ func (app *application) AverageTime(w http.ResponseWriter, r *http.Request) {
 }
 func (app *application) removeUser(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id, err := strconv.Atoi(params.ByName("id"))
+	id := params.ByName("id")
 
-	err = app.models.DB.RemoveActiveUsers(id)
+	err := app.models.DB.RemoveActiveUsers(id)
 	if err != nil {
 		app.errJSON(w, err)
 		return
 	}
 	err = app.writeJSON(w, http.StatusOK, "ok", "status")
+	if err != nil {
+		app.errJSON(w, err)
+	}
 }
 func (app *application) addUser(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id, err := strconv.Atoi(params.ByName("id"))
-	if err != nil {
-		app.logger.Print(errors.New("invalid id parameter"))
-		app.errJSON(w, err)
-		return
-	}
+	id := params.ByName("id")
 
-	err = app.models.DB.AddActiveUsers(id)
+	err := app.models.DB.AddActiveUsers(id)
 	if err != nil {
 		app.errJSON(w, err)
 		return
 	}
 	err = app.writeJSON(w, http.StatusOK, "ok", "status")
+	if err != nil {
+		app.errJSON(w, err)
+	}
 }
+// getUsers godoc
+// @Summary      Listar todos los usuarios
+// @Description  Retorna una lista de todos los usuarios registrados en el sistema
+// @Tags         users
+// @Accept       json
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]interface{}
+// @Router       /v1/users/ [get]
 func (app *application) getUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := app.models.DB.All()
 	if err != nil {
@@ -445,7 +511,7 @@ func (app *application) getCommentsCMS(w http.ResponseWriter, r *http.Request) {
 }
 func (app *application) getCommentsUser(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id, err := strconv.Atoi(params.ByName("id"))
+	id := params.ByName("id")
 	comments, err := app.models.DB.CommentsUser(id)
 	if err != nil {
 		app.errJSON(w, err)
@@ -471,31 +537,50 @@ func (app *application) commentsDisplay(w http.ResponseWriter, r *http.Request) 
 	err = app.writeJSON(w, http.StatusOK, "Success", "Status")
 
 }
+// confirm godoc
+// @Summary      Confirmar email de usuario
+// @Description  Confirma el email de un usuario usando su ID
+// @Tags         users
+// @Accept       json
+// @Produce      json
+// @Param        id   path      string  true  "ID del usuario (UUID)"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]interface{}
+// @Router       /v1/confirm/{id} [post]
 func (app *application) confirm(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id, err := strconv.Atoi(params.ByName("id"))
+	id := params.ByName("id")
+	app.logger.Println("id is ", id)
+	err := app.models.DB.Confirm(id)
 	if err != nil {
-		app.logger.Print(errors.New("invalid id parameter"))
 		app.errJSON(w, err)
 		return
 	}
-	app.logger.Println("id is ", id)
-	err = app.models.DB.Confirm(id)
-
 	err = app.writeJSON(w, http.StatusOK, "Success", "Status")
+	if err != nil {
+		app.errJSON(w, err)
+	}
 }
 func (app *application) mterm(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
-	id, err := strconv.Atoi(params.ByName("id"))
+	idStr := params.ByName("id")
+	app.logger.Println("id is ", idStr)
+	// idterm es un INT (ID de término, no de usuario)
+	id, err := strconv.Atoi(idStr)
 	if err != nil {
 		app.logger.Print(errors.New("invalid id parameter"))
 		app.errJSON(w, err)
 		return
 	}
-	app.logger.Println("id is ", id)
 	err = app.models.DB.Mterm(id)
-
+	if err != nil {
+		app.errJSON(w, err)
+		return
+	}
 	err = app.writeJSON(w, http.StatusOK, "Success", "Status")
+	if err != nil {
+		app.errJSON(w, err)
+	}
 }
 func (app *application) mtermlost(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
@@ -532,28 +617,34 @@ func (app *application) delete(w http.ResponseWriter, r *http.Request) {
 	err := json.NewDecoder(r.Body).Decode(&params)
 	if err != nil {
 		app.errJSON(w, err)
+		return
 	}
-	id, err := strconv.Atoi(params.Id)
+	id := params.Id
+	app.logger.Println("id is ", id)
+	valid, err := app.models.DB.ValidateToken(params.Token, id, app.config.jwt.secret)
 	if err != nil {
-		app.logger.Print(errors.New("invalid id parameter"))
 		app.errJSON(w, err)
 		return
 	}
-	app.logger.Println("id is ", id)
-	valid, err := app.models.DB.ValidateToken(params.Token, id, app.config.jwt.secret)
 	var status int
 	var msg string
 	if valid {
 		err = app.models.DB.Delete(id, params.Token)
+		if err != nil {
+			app.errJSON(w, err)
+			return
+		}
 		status = http.StatusOK
 		msg = "Success"
 	} else {
 		status = http.StatusForbidden
-		msg = "Error"
-		app.errJSON(w, err)
+		msg = "Invalid token"
 	}
 
 	err = app.writeJSON(w, status, msg, "Status")
+	if err != nil {
+		app.errJSON(w, err)
+	}
 }
 
 type BookCodeParams struct {
@@ -567,37 +658,39 @@ func (app *application) ValidateBookCode(w http.ResponseWriter, r *http.Request)
 	err := json.NewDecoder(r.Body).Decode(&params)
 	if err != nil {
 		app.errJSON(w, err)
+		return
 	}
-	id, err := strconv.Atoi(params.Id)
+	id := params.Id
 	app.logger.Println("code is: ", params.Code)
 	app.logger.Println("id is: ", params.Id)
 	app.logger.Println("token is: ", params.Token)
+	valid, err := app.models.DB.ValidateToken(params.Token, id, app.config.jwt.secret)
 	if err != nil {
-		app.logger.Print(errors.New("invalid id parameter"))
 		app.errJSON(w, err)
 		return
 	}
-	valid, err := app.models.DB.ValidateToken(params.Token, id, app.config.jwt.secret)
 	var status int
 	var msg string
 	if valid {
 		err, st := app.models.DB.ValidateBookCodeUser(id, params.Code)
-		status = http.StatusOK
-		app.logger.Println(st)
-		msg = "Success"
 		if err != nil || st == 0 {
 			status = http.StatusForbidden
 			msg = "Error invalid code parameter"
+		} else {
+			status = http.StatusOK
+			msg = "Success"
 		}
 		app.logger.Println("token correct")
 	} else {
 		app.logger.Println("token incorrect")
 		status = http.StatusForbidden
-		msg = "Error"
-		app.errJSON(w, err)
+		msg = "Invalid token"
 	}
 
 	err = app.writeJSON(w, status, msg, "Status")
+	if err != nil {
+		app.errJSON(w, err)
+	}
 }
 func (app *application) forgotPWD(w http.ResponseWriter, r *http.Request) {
 	params := httprouter.ParamsFromContext(r.Context())
@@ -669,7 +762,7 @@ func (app *application) changePassword(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		app.errJSON(w, err)
 	}
-	id, err := strconv.Atoi(params.Id)
+	id := params.Id
 	pwd := params.Pwd
 	app.logger.Println("Param is: ", id)
 	app.logger.Println("Password is: ", pwd)
@@ -686,7 +779,7 @@ func (app *application) changePasswordLog(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		app.errJSON(w, err)
 	}
-	id, err := strconv.Atoi(params.Id)
+	id := params.Id
 	newpwd := params.Newpwd
 	token := params.Token
 	app.logger.Println("Param is: ", id)

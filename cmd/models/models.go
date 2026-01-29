@@ -16,7 +16,7 @@ func NewModels(db *sql.DB) Models {
 }
 
 type User struct {
-	Id        int       `json:"id"`
+	Id        string    `json:"id"`
 	Username  string    `json:"username"`
 	Name      string    `json:"name"`
 	LastName  string    `json:"lastname"`
@@ -35,7 +35,7 @@ type User struct {
 }
 type Feedback struct {
 	Id      int       `json:"id"`
-	IdUser  int       `json:"id_user"`
+	IdUser  string    `json:"id_user"`
 	Name    string    `json:"name"`
 	Picture string    `json:"picture"`
 	Rate    int       `json:"stars"`

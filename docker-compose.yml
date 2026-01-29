@@ -1,0 +1,48 @@
+services:
+  db:
+    image: mysql:8.0
+    container_name: accounting_users_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootlocal
+      MYSQL_DATABASE: preview
+      MYSQL_USER: preview_usr
+      MYSQL_PASSWORD: localdev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-prootlocal"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+    networks:
+      - app-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: accounting_users_app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - DATABASE_DSN=preview_usr:localdev@tcp(db:3306)/preview?parseTime=true
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  mysql_data:
+
+networks:
+  app-network:
+    driver: bridge

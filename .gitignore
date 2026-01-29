@@ -35,3 +35,5 @@ go.work
 # Environment files that may contain sensitive information
 .env
 
+# Swagger generated docs
+/docs/

@@ -4,10 +4,17 @@ import (
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
+	httpSwagger "github.com/swaggo/http-swagger"
 )
 
 func (app *application) routes() *httprouter.Router {
 	router := httprouter.New()
+	
+	// Swagger documentation
+	router.HandlerFunc(http.MethodGet, "/swagger/*any", httpSwagger.Handler(
+		httpSwagger.URL("http://localhost:8000/swagger/doc.json"),
+	))
+	
 	router.HandlerFunc(http.MethodGet, "/status", app.statusHandler)
 	router.HandlerFunc(http.MethodGet, "/v1/user/:id", app.getUser)
 	router.HandlerFunc(http.MethodGet, "/v1/users/", app.getUsers)

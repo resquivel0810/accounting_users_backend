@@ -14,6 +14,7 @@ import (
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	"github.com/pascaldekloe/jwt"
 	"github.com/xuri/excelize/v2"
 )
@@ -46,21 +47,23 @@ func (m DBModel) ForgotPassword(txt string) error {
 	if err != nil {
 		return err
 	}
-	if id != 0 {
+	if id != "" {
 		user, err := m.Get(id)
 		if err != nil {
 			return err
 		}
 		rand.Seed(time.Now().UnixNano())
 		code := randomString(50)
-		var q = "INSERT INTO user_code (id_user,code) values (" + strconv.Itoa(id) + ",'" + code + "')"
+		var q = "INSERT INTO user_code (id_user,code) values ('" + id + "','" + code + "')"
 		_, err = m.DB.Exec(q)
 
 		if err != nil {
 			return err
 		}
 		user.Code = code
-		mail_send(user, "Reset Password", "forgot.html")
+		if err := mail_send(user, "Reset Password", "forgot.html"); err != nil {
+			log.Printf("Warning: Failed to send password reset email to %s: %v", user.Email, err)
+		}
 	}
 	return nil
 }
@@ -125,32 +128,33 @@ func (m DBModel) IsBookCodeUsed(code string) (bool, error) {
 	}
 	return false, nil
 }
-func (m DBModel) GetIdCode(code string) (int, error) {
+func (m DBModel) GetIdCode(code string) (string, error) {
 	var q = "SELECT id_user FROM user_code WHERE code='" + code + "' and status=1 and NOW()<expiration"
 	row, err := m.DB.Query(q)
-	var id, i int
-	i = 0
+	var id string
+	var found bool
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	for row.Next() {
 		err := row.Scan(&id)
 		if err != nil {
 			panic(err)
 		}
-		i++
+		found = true
+		break
 	}
-	if i == 0 {
-		return -1, nil
+	if !found {
+		return "", nil
 	}
 	return id, nil
 }
-func (m DBModel) VerifyUser(user string) (int, error) {
+func (m DBModel) VerifyUser(user string) (string, error) {
 	var q = "SELECT id FROM users WHERE username='" + user + "'"
 	row, err := m.DB.Query(q)
-	var id int
+	var id string
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	for row.Next() {
 		err := row.Scan(&id)
@@ -162,12 +166,12 @@ func (m DBModel) VerifyUser(user string) (int, error) {
 
 	return id, nil
 }
-func (m DBModel) VerifyEmail(email string) (int, error) {
+func (m DBModel) VerifyEmail(email string) (string, error) {
 	var q = "SELECT id FROM users WHERE email='" + email + "'"
 	row, err := m.DB.Query(q)
-	var id int
+	var id string
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	for row.Next() {
 		err := row.Scan(&id)
@@ -188,8 +192,8 @@ func (m DBModel) CloseCode(code string) error {
 	}
 	return nil
 }
-func (m DBModel) CloseAllCodes(id int) error {
-	var q = "UPDATE user_code SET status=0 where id_user=" + strconv.Itoa(id) + ""
+func (m DBModel) CloseAllCodes(id string) error {
+	var q = "UPDATE user_code SET status=0 where id_user='" + id + "'"
 	_, err := m.DB.Exec(q)
 
 	if err != nil {
@@ -197,12 +201,12 @@ func (m DBModel) CloseAllCodes(id int) error {
 	}
 	return nil
 }
-func (m DBModel) GetIdUser(txt string) (int, error) {
+func (m DBModel) GetIdUser(txt string) (string, error) {
 	var q = "SELECT id FROM users WHERE username='" + txt + "' or email='" + txt + "'"
 	row, err := m.DB.Query(q)
-	var id int
+	var id string
 	if err != nil {
-		return 0, err
+		return "", err
 	}
 	for row.Next() {
 		err := row.Scan(&id)
@@ -215,42 +219,41 @@ func (m DBModel) GetIdUser(txt string) (int, error) {
 	return id, nil
 }
 func (m DBModel) Register(user *User) (*User, error) {
-	var q = "INSERT INTO users (id,username,name,last_name,email,pwd,profile_picture_url,status,token,role,account) values (0,'" + user.Username + "','" + user.Name + "','" + user.LastName + "','" + user.Email + "',MD5('" + user.PWD + "'),'" + user.Picture + "',1,''," + strconv.Itoa(user.Role) + "," + strconv.Itoa(user.Account) + ")"
-	res, err := m.DB.Exec(q)
+	// Generar UUID para el nuevo usuario
+	user.Id = uuid.New().String()
+	var q = "INSERT INTO users (id,username,name,last_name,email,pwd,profile_picture_url,status,token,role,account) values ('" + user.Id + "','" + user.Username + "','" + user.Name + "','" + user.LastName + "','" + user.Email + "',MD5('" + user.PWD + "'),'" + user.Picture + "',1,''," + strconv.Itoa(user.Role) + "," + strconv.Itoa(user.Account) + ")"
+	_, err := m.DB.Exec(q)
 
 	if err != nil {
 		return nil, err
 	}
-	lastid, err := res.LastInsertId()
-	if err != nil {
-		panic(err)
-	}
-	user.Id = int(lastid)
 	rand.Seed(time.Now().UnixNano())
 	code := randomString(50)
-	q = "INSERT INTO user_code (id_user,code) values (" + strconv.Itoa(user.Id) + ",'" + code + "')"
+	q = "INSERT INTO user_code (id_user,code) values ('" + user.Id + "','" + code + "')"
 	_, err = m.DB.Exec(q)
 
 	if err != nil {
 		return nil, err
 	}
 	user.Code = code
-	mail_send(user, "Confirm your email address", "confirm.html")
+	if err := mail_send(user, "Confirm your email address", "confirm.html"); err != nil {
+		log.Printf("Warning: Failed to send confirmation email to %s: %v", user.Email, err)
+		// No retornamos error para que el registro se complete aunque falle el email
+	}
 	return user, nil
 }
 func (m DBModel) RegisterGoogle(user *User) (*User, error) {
-	var q = "INSERT INTO users (id,username,name,last_name,email,pwd,profile_picture_url,status,token,role,account,email_conf) values (0,'" + user.Username + "','" + user.Name + "','" + user.LastName + "','" + user.Email + "',MD5('" + user.PWD + "'),'" + user.Picture + "',1,'" + user.Token + "'," + strconv.Itoa(user.Role) + "," + strconv.Itoa(user.Account) + ",1)"
-	res, err := m.DB.Exec(q)
+	// Generar UUID para el nuevo usuario
+	user.Id = uuid.New().String()
+	var q = "INSERT INTO users (id,username,name,last_name,email,pwd,profile_picture_url,status,token,role,account,email_conf) values ('" + user.Id + "','" + user.Username + "','" + user.Name + "','" + user.LastName + "','" + user.Email + "',MD5('" + user.PWD + "'),'" + user.Picture + "',1,'" + user.Token + "'," + strconv.Itoa(user.Role) + "," + strconv.Itoa(user.Account) + ",1)"
+	_, err := m.DB.Exec(q)
 
 	if err != nil {
 		return nil, err
 	}
-	lastid, err := res.LastInsertId()
-	if err != nil {
-		panic(err)
+	if err := mail_send(user, "Welcome", "welcome.html"); err != nil {
+		log.Printf("Warning: Failed to send welcome email to %s: %v", user.Email, err)
 	}
-	user.Id = int(lastid)
-	mail_send(user, "Welcome", "welcome.html")
 	return user, nil
 }
 func (m DBModel) Update(user *User) (*User, error) {
@@ -259,34 +262,53 @@ func (m DBModel) Update(user *User) (*User, error) {
 		txt = "pwd=MD5('" + user.PWD + "'),"
 	}
 	aux, _ := m.Get(user.Id)
-	var q = "UPDATE users SET " + txt + " username='" + user.Username + "',name='" + user.Name + "',last_name='" + user.LastName + "',email='" + user.Email + "',profile_picture_url='" + user.Picture + "',status=1 WHERE id=" + strconv.Itoa(user.Id)
+	var q = "UPDATE users SET " + txt + " username='" + user.Username + "',name='" + user.Name + "',last_name='" + user.LastName + "',email='" + user.Email + "',profile_picture_url='" + user.Picture + "',status=1 WHERE id='" + user.Id + "'"
 	_, err := m.DB.Exec(q)
 
 	if err != nil {
 		return nil, err
 	}
 	if aux.Status == 0 {
-		mail_send(user, "Good to see you're back!", "userback.html")
+		if err := mail_send(user, "Good to see you're back!", "userback.html"); err != nil {
+			log.Printf("Warning: Failed to send welcome back email to %s: %v", user.Email, err)
+		}
 	}
 	return user, nil
 }
-func (m DBModel) UpdateEmail(id int, email string) (int, error) {
+func (m DBModel) UpdateEmail(id string, email string) (string, error) {
 	var user *User
 	user, _ = m.Get(id)
-	var q = "UPDATE users SET email='" + email + "' WHERE id=" + strconv.Itoa(id)
-	_, err := m.DB.Exec(q)
-
-	if err != nil {
-		return 0, err
+	if user == nil {
+		return "", fmt.Errorf("user not found")
 	}
-	mail_send(user, "You've changed your email", "oldemail.html")
+	
+	// Guardar el email antiguo antes de actualizar
+	oldEmail := user.Email
+	
+	// Enviar notificación al email antiguo ANTES de actualizar la BD
+	if err := mail_send(user, "You've changed your email", "oldemail.html"); err != nil {
+		log.Printf("Warning: Failed to send old email notification to %s: %v", oldEmail, err)
+	}
+	
+	// Actualizar email en la base de datos
+	var q = "UPDATE users SET email='" + email + "' WHERE id='" + id + "'"
+	_, err := m.DB.Exec(q)
+	if err != nil {
+		return "", err
+	}
+	
+	// Actualizar el objeto user con el nuevo email
 	user.Email = email
-	mail_send(user, "You've changed your email", "newemail.html")
+	
+	// Enviar notificación al nuevo email
+	if err := mail_send(user, "You've changed your email", "newemail.html"); err != nil {
+		log.Printf("Warning: Failed to send new email notification to %s: %v", email, err)
+	}
 	return id, nil
 }
 func (m DBModel) SaveComment(iduser string, comment string, rate string, consent string) (int64, error) {
 
-	var q = "INSERT into feedback (id,iduser,rate,comment,consent) VALUES  (0," + iduser + "," + rate + ",'" + comment + "'," + consent + ")"
+	var q = "INSERT into feedback (id,iduser,rate,comment,consent) VALUES  (0,'" + iduser + "'," + rate + ",'" + comment + "'," + consent + ")"
 	res, err := m.DB.Exec(q)
 	lastId, err := res.LastInsertId()
 	if err != nil {
@@ -303,7 +325,8 @@ func (m DBModel) Login(param string, password string, secret string) (*User, err
 	}
 	var user User
 	for row.Next() {
-		var id, status, role, account, conf, active int
+		var id string
+		var status, role, account, conf, active int
 		var username, name, lastname, email, pwd, pic, token string
 		var created, updated time.Time
 		err := row.Scan(&id, &username, &name, &lastname, &email, &pwd, &pic, &status, &token, &role, &account, &conf, &created, &updated, &active)
@@ -326,18 +349,20 @@ func (m DBModel) Login(param string, password string, secret string) (*User, err
 		user.Updated = updated
 		user.Active = active
 	}
-	if user.Confirmed == 0 && user.Id > 0 {
+	if user.Confirmed == 0 && user.Id != "" {
 		m.CloseAllCodes(user.Id)
 		rand.Seed(time.Now().UnixNano())
 		code := randomString(50)
-		q = "INSERT INTO user_code (id_user,code) values (" + strconv.Itoa(user.Id) + ",'" + code + "')"
+		q = "INSERT INTO user_code (id_user,code) values ('" + user.Id + "','" + code + "')"
 		_, err = m.DB.Exec(q)
 
 		if err != nil {
 			return nil, err
 		}
 		user.Code = code
-		mail_send(&user, "Don't forget to confirm your account", "forgetconfirm.html")
+		if err := mail_send(&user, "Don't forget to confirm your account", "forgetconfirm.html"); err != nil {
+			log.Printf("Warning: Failed to send confirmation reminder email to %s: %v", user.Email, err)
+		}
 	}
 	user.Token, _ = m.GnerateToken(user.Id, secret)
 	m.SaveToken(user.Id, user.Token)
@@ -352,7 +377,8 @@ func (m DBModel) ValidatePWD(param string, password string, secret string) (*Use
 	}
 	var user User
 	for row.Next() {
-		var id, status, role, account, conf, active int
+		var id string
+		var status, role, account, conf, active int
 		var username, name, lastname, email, pwd, pic, token string
 		var created, updated time.Time
 		err := row.Scan(&id, &username, &name, &lastname, &email, &pwd, &pic, &status, &token, &role, &account, &conf, &created, &updated, &active)
@@ -377,37 +403,33 @@ func (m DBModel) ValidatePWD(param string, password string, secret string) (*Use
 	}
 	return &user, nil
 }
-func (m DBModel) AddActiveUsers(id int) error {
-	var q = "UPDATE users SET active = 1 where id="
-	var aux = strconv.Itoa(id)
-	_, err := m.DB.Exec(q + aux)
+func (m DBModel) AddActiveUsers(id string) error {
+	var q = "UPDATE users SET active = 1 where id='" + id + "'"
+	_, err := m.DB.Exec(q)
 	if err != nil {
 		return err
 	}
 	return nil
 }
-func (m DBModel) RemoveActiveUsers(id int) error {
-	var q = "UPDATE users SET active = 0 where id="
-	var aux = strconv.Itoa(id)
-	_, err := m.DB.Exec(q + aux)
+func (m DBModel) RemoveActiveUsers(id string) error {
+	var q = "UPDATE users SET active = 0 where id='" + id + "'"
+	_, err := m.DB.Exec(q)
 	if err != nil {
 		return err
 	}
 	return nil
 }
-func (m DBModel) UpdateToken(id int, token string) error {
-	var q = "UPDATE users SET token = '" + token + "' where id="
-	var aux = strconv.Itoa(id)
-	_, err := m.DB.Exec(q + aux)
+func (m DBModel) UpdateToken(id string, token string) error {
+	var q = "UPDATE users SET token = '" + token + "' where id='" + id + "'"
+	_, err := m.DB.Exec(q)
 	if err != nil {
 		return err
 	}
 	return nil
 }
-func (m DBModel) UpdateStatus(id int) error {
-	var q = "UPDATE users SET status = 1 where id="
-	var aux = strconv.Itoa(id)
-	_, err := m.DB.Exec(q + aux)
+func (m DBModel) UpdateStatus(id string) error {
+	var q = "UPDATE users SET status = 1 where id='" + id + "'"
+	_, err := m.DB.Exec(q)
 	if err != nil {
 		return err
 	}
@@ -415,9 +437,9 @@ func (m DBModel) UpdateStatus(id int) error {
 	mail_send(user, "Good to see you're back!", "userback.html")
 	return nil
 }
-func (m DBModel) GnerateToken(id int, secret string) (string, error) {
+func (m DBModel) GnerateToken(id string, secret string) (string, error) {
 	var claims jwt.Claims
-	claims.Subject = fmt.Sprint(id)
+	claims.Subject = id
 	claims.Issued = jwt.NewNumericTime(time.Now())
 	claims.NotBefore = jwt.NewNumericTime(time.Now())
 	claims.Expires = jwt.NewNumericTime(time.Now().Add(730 * time.Hour))
@@ -429,7 +451,7 @@ func (m DBModel) GnerateToken(id int, secret string) (string, error) {
 	}
 	return string(jwtBytes), nil
 }
-func (m DBModel) ValidateToken(tokenString string, id int, secret string) (bool, error) {
+func (m DBModel) ValidateToken(tokenString string, id string, secret string) (bool, error) {
 	var valid bool
 	claims, err := jwt.HMACCheck([]byte(tokenString), []byte(secret))
 	if err != nil {
@@ -451,10 +473,9 @@ func (m DBModel) ValidateToken(tokenString string, id int, secret string) (bool,
 	}
 	return valid, nil
 }
-func (m DBModel) SaveToken(id int, token string) error {
-	var q = "UPDATE users SET token='" + token + "' where id="
-	var aux = strconv.Itoa(id)
-	_, err := m.DB.Exec(q + aux)
+func (m DBModel) SaveToken(id string, token string) error {
+	var q = "UPDATE users SET token='" + token + "' where id='" + id + "'"
+	_, err := m.DB.Exec(q)
 
 	if err != nil {
 		return err
@@ -592,17 +613,17 @@ func (m DBModel) CountActiveusers() (int, error) {
 	//mail_send(&user, "Confirm your email address", "confirm.html")
 	return total, nil
 }
-func (m DBModel) Get(id int) (*User, error) {
-	var q = "SELECT * FROM users WHERE id="
-	var aux = strconv.Itoa(id)
-	row, err := m.DB.Query(q + aux)
+func (m DBModel) Get(id string) (*User, error) {
+	var q = "SELECT * FROM users WHERE id='" + id + "'"
+	row, err := m.DB.Query(q)
 
 	if err != nil {
 		return nil, err
 	}
 	var user User
 	for row.Next() {
-		var id, status, role, account, conf, active int
+		var id string
+		var status, role, account, conf, active int
 		var username, name, lastname, email, pwd, pic, token string
 		var created, updated time.Time
 		err := row.Scan(&id, &username, &name, &lastname, &email, &pwd, &pic, &status, &token, &role, &account, &conf, &created, &updated, &active)
@@ -649,10 +670,9 @@ func (m DBModel) FolioId(title string) (int, error) {
 	}
 	return id, nil
 }
-func (m DBModel) CompareDBtoken(id int, token string) (bool, error) {
-	var q = "SELECT * FROM users WHERE token='" + token + "'AND id="
-	var aux = strconv.Itoa(id)
-	row, err := m.DB.Query(q + aux)
+func (m DBModel) CompareDBtoken(id string, token string) (bool, error) {
+	var q = "SELECT * FROM users WHERE token='" + token + "' AND id='" + id + "'"
+	row, err := m.DB.Query(q)
 
 	if err != nil {
 		return false, err
@@ -666,9 +686,8 @@ func (m DBModel) CompareDBtoken(id int, token string) (bool, error) {
 	}
 	return valid, nil
 }
-func (m DBModel) SaveReason(id int, reason string) (bool, error) {
-	var aux = strconv.Itoa(id)
-	var q = "INSERT INTO DelAccount (userid,reason) values (" + aux + ",'" + reason + "')"
+func (m DBModel) SaveReason(id string, reason string) (bool, error) {
+	var q = "INSERT INTO DelAccount (userid,reason) values ('" + id + "','" + reason + "')"
 	_, err := m.DB.Exec(q)
 
 	if err != nil {
@@ -688,7 +707,8 @@ func (m DBModel) All() (*[]User, error) {
 	var user User
 	users := []User{}
 	for row.Next() {
-		var id, status, role, account, conf, active int
+		var id string
+		var status, role, account, conf, active int
 		var username, name, lastname, email, pwd, pic, token string
 		var created, updated time.Time
 		err := row.Scan(&id, &username, &name, &lastname, &email, &pwd, &pic, &status, &token, &role, &account, &conf, &created, &updated, &active)
@@ -725,8 +745,8 @@ func (m DBModel) Comments() (*[]Feedback, error) {
 	var comment Feedback
 	comments := []Feedback{}
 	for row.Next() {
-		var id, id_user, rate int
-		var name, pic, com string
+		var id, rate int
+		var id_user, name, pic, com string
 		err := row.Scan(&id, &id_user, &name, &pic, &rate, &com)
 		if err != nil {
 			panic(err)
@@ -753,7 +773,8 @@ func (m DBModel) CommentsCMS() (*[]Feedback, error) {
 	var comment Feedback
 	comments := []Feedback{}
 	for row.Next() {
-		var id, id_user, rate, consent, display, watched int
+		var id, rate, consent, display, watched int
+		var id_user string
 		var created time.Time
 		var name, pic, com string
 		err := row.Scan(&id, &id_user, &name, &pic, &rate, &com, &consent, &display, &created, &watched)
@@ -776,9 +797,8 @@ func (m DBModel) CommentsCMS() (*[]Feedback, error) {
 	}
 	return &comments, nil
 }
-func (m DBModel) CommentsUser(id int) (*[]Feedback, error) {
-	var aux = strconv.Itoa(id)
-	row, err := m.DB.Query(("SELECT feedback.id,users.id,name,profile_picture_url,rate,comment FROM feedback inner join users ON feedback.iduser = users.id where feedback.idUser=" + aux))
+func (m DBModel) CommentsUser(id string) (*[]Feedback, error) {
+	row, err := m.DB.Query(("SELECT feedback.id,users.id,name,profile_picture_url,rate,comment FROM feedback inner join users ON feedback.iduser = users.id where feedback.idUser='" + id + "'"))
 
 	if err != nil {
 		return nil, err
@@ -786,8 +806,8 @@ func (m DBModel) CommentsUser(id int) (*[]Feedback, error) {
 	var comment Feedback
 	comments := []Feedback{}
 	for row.Next() {
-		var id, id_user, rate int
-		var name, pic, com string
+		var id, rate int
+		var id_user, name, pic, com string
 		err := row.Scan(&id, &id_user, &name, &pic, &rate, &com)
 		if err != nil {
 			panic(err)
@@ -824,10 +844,9 @@ func (m DBModel) CommentWatched(id string) error {
 
 	return nil
 }
-func (m DBModel) Confirm(id int) error {
-	var q = "UPDATE users SET email_conf=1 where id="
-	var aux = strconv.Itoa(id)
-	_, err := m.DB.Exec(q + aux)
+func (m DBModel) Confirm(id string) error {
+	var q = "UPDATE users SET email_conf=1 where id='" + id + "'"
+	_, err := m.DB.Exec(q)
 
 	if err != nil {
 		return err
@@ -865,8 +884,8 @@ func (m DBModel) MsaveTime(time string) error {
 	return nil
 
 }
-func (m DBModel) Delete(id int, token string) error {
-	var q = "UPDATE users SET status=0 where id=" + strconv.Itoa(id) + " AND token='" + token + "'"
+func (m DBModel) Delete(id string, token string) error {
+	var q = "UPDATE users SET status=0 where id='" + id + "' AND token='" + token + "'"
 	var user *User
 	_, err := m.DB.Exec(q)
 
@@ -874,25 +893,27 @@ func (m DBModel) Delete(id int, token string) error {
 		return err
 	}
 	user, _ = m.Get(id)
-	mail_send(user, "We hope you back soon", "userdel.html")
+	if err := mail_send(user, "We hope you back soon", "userdel.html"); err != nil {
+		log.Printf("Warning: Failed to send account deletion email to %s: %v", user.Email, err)
+	}
 	return nil
 
 }
-func (m DBModel) ValidateBookCodeUser(id int, code string) (error, int) {
+func (m DBModel) ValidateBookCodeUser(id string, code string) (error, int) {
 	b, err := m.ValidateBookCode(code)
 	var st int
 	if err != nil {
 		return err, 0
 	}
 	if b {
-		var q = "UPDATE bookcode SET status = 0,id_user=" + strconv.Itoa(id) + " where code=md5('" + code + "') and status=1"
+		var q = "UPDATE bookcode SET status = 0,id_user='" + id + "' where code=md5('" + code + "') and status=1"
 		stmt, err := m.DB.Exec(q)
 		if err != nil {
 			return err, 0
 		}
 		rows, _ := stmt.RowsAffected()
 		st = int(rows)
-		q = "UPDATE users SET account = 2 where id=" + strconv.Itoa(id)
+		q = "UPDATE users SET account = 2 where id='" + id + "'"
 		_, err = m.DB.Exec(q)
 		if err != nil {
 			return err, 0
@@ -901,30 +922,33 @@ func (m DBModel) ValidateBookCodeUser(id int, code string) (error, int) {
 	return nil, st
 
 }
-func (m DBModel) ChangePassword(id int, password string) error {
-	var q = "UPDATE users SET pwd = MD5('" + password + "') where id="
-	var aux = strconv.Itoa(id)
-	_, err := m.DB.Exec(q + aux)
-	var user *User
-	if err != nil {
-		return err
-	}
-	user, _ = m.Get(id)
-	mail_send(user, "Password Change", "pwdreset.html")
-	return nil
-}
-func (m DBModel) ChangePasswordLog(id int, newpwd string) error {
-	var q = "UPDATE users SET pwd = MD5('" + newpwd + "') where id=" + strconv.Itoa(id) + " "
+func (m DBModel) ChangePassword(id string, password string) error {
+	var q = "UPDATE users SET pwd = MD5('" + password + "') where id='" + id + "'"
 	_, err := m.DB.Exec(q)
 	var user *User
 	if err != nil {
 		return err
 	}
 	user, _ = m.Get(id)
-	mail_send(user, "Password Change", "pwdchange.html")
+	if err := mail_send(user, "Password Change", "pwdreset.html"); err != nil {
+		log.Printf("Warning: Failed to send password reset email to %s: %v", user.Email, err)
+	}
 	return nil
 }
-func mail_send(user *User, subject string, temp string) {
+func (m DBModel) ChangePasswordLog(id string, newpwd string) error {
+	var q = "UPDATE users SET pwd = MD5('" + newpwd + "') where id='" + id + "'"
+	_, err := m.DB.Exec(q)
+	var user *User
+	if err != nil {
+		return err
+	}
+	user, _ = m.Get(id)
+	if err := mail_send(user, "Password Change", "pwdchange.html"); err != nil {
+		log.Printf("Warning: Failed to send password change email to %s: %v", user.Email, err)
+	}
+	return nil
+}
+func mail_send(user *User, subject string, temp string) error {
 	from := mail.Address{"Accounting A-Z", "no-reply@accounting-a-z.ch"}
 	to := mail.Address{user.Name, user.Email}
 
@@ -939,12 +963,14 @@ func mail_send(user *User, subject string, temp string) {
 	}
 	t, err := template.ParseFiles(temp)
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error parsing email template %s: %v", temp, err)
+		return err
 	}
 	buf := new(bytes.Buffer)
 	err = t.Execute(buf, user)
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error executing email template %s: %v", temp, err)
+		return err
 	}
 	message += buf.String()
 	servername := "server29.hostfactory.ch:465"
@@ -956,38 +982,48 @@ func mail_send(user *User, subject string, temp string) {
 	}
 	conn, err := tls.Dial("tcp", servername, tlsConfig)
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error connecting to SMTP server: %v", err)
+		return err
 	}
+	defer conn.Close()
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error creating SMTP client: %v", err)
+		return err
 	}
+	defer client.Quit()
 	err = client.Auth(auth)
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error authenticating SMTP: %v", err)
+		return err
 	}
 	err = client.Mail(from.Address)
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error setting sender: %v", err)
+		return err
 	}
 	err = client.Rcpt(to.Address)
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error setting recipient: %v", err)
+		return err
 	}
 	w, err := client.Data()
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error getting data writer: %v", err)
+		return err
 	}
 	_, err = w.Write([]byte(message))
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error writing email body: %v", err)
+		w.Close()
+		return err
 	}
 	err = w.Close()
 	if err != nil {
-		log.Panic(err)
+		log.Printf("Error closing data writer: %v", err)
+		return err
 	}
-	client.Quit()
-
+	return nil
 }
 
 // Returns an int >= min, < max

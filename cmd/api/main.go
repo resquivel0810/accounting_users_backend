@@ -10,13 +10,30 @@ import (
 	"net/http"
 	"os"
 	"time"
-	// "github.com/joho/godotenv"
 
+	"github.com/joho/godotenv"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/heroku/x/hmetrics/onload"
+	_ "backend/docs" // Swagger docs - se genera automáticamente en Dockerfile
 )
 
 const version = "1.0.0"
+
+// @title           Accounting Users API
+// @version         1.0.0
+// @description     API REST para gestión de usuarios de Accounting A-Z
+// @termsOfService  http://swagger.io/terms/
+
+// @contact.name   API Support
+// @contact.email  support@accounting-a-z.ch
+
+// @license.name  Apache 2.0
+// @license.url   http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host      localhost:8000
+// @BasePath  /
+
+// @securityDefinitions.basic  BasicAuth
 
 type config struct {
 	port int
@@ -41,21 +58,26 @@ type application struct {
 }
 
 func main() {
-	// os.Setenv("PORT", "8080")
-	// Find .env file
-	// err := godotenv.Load(".env")
-	// if err != nil{
-	//  log.Fatalf("Error loading .env file: %s", err)
-	// }
+	if err := godotenv.Load(".env"); err != nil {
+		// .env opcional: si no existe, se usan las variables de entorno del sistema
+		godotenv.Load(".env.dev")
+	}
 	port := os.Getenv("PORT")
 	if port == "" {
 		log.Fatal("$PORT must be set")
 	}
-	
+
+	dsnDefault := os.Getenv("DATABASE_DSN")
+	if dsnDefault == "" {
+		dsnDefault = os.Getenv("DSN")
+	}
+	if dsnDefault == "" {
+		dsnDefault = "preview_usr:TU8uPynebAqadady@tcp(server29.hostfactory.ch:3306)/preview?parseTime=true"
+	}
+
 	var cfg config
-	// flag.IntVar(&cfg.port, "port", port, "Server port to listen on")
 	flag.StringVar(&cfg.env, "env", "Development", "Application enviroment (Development|Production)")
-	flag.StringVar(&cfg.db.dsn, "dsn", "preview_usr:TU8uPynebAqadady@tcp(server29.hostfactory.ch:3306)/preview?parseTime=true", "MySQL connection string")
+	flag.StringVar(&cfg.db.dsn, "dsn", dsnDefault, "MySQL connection string")
 	flag.StringVar(&cfg.jwt.secret, "jwt-secret", "2dce505d96a53c5768052ee90f3df2055657518dad489160df9913f66042e160", "secret")
 	flag.Parsed()
 
